@@ -10,16 +10,18 @@ import numpy as np
 #            Edite os valores aqui para configurar diferentes cenários de estudo.
 # ##############################################################################
 
+
 def configurar_cenario():
     """Retorna os dicionários de configuração para a simulação."""
     
     # 1. Configuracoes dos Recursos Energeticos Distribuidos (DERs)
     config_ders = {
         'tipos': ['solar', 'eolico'],
-        # Use barras que existem no case33bw (ex: 2 a 33)
+        # Use barras que existem no case2383wp (ex: 1 a 2383).
+        # As capacidades agora estão em centenas de MW.
         'localizacao': [
-            (17, 0.5, 'solar'),   # Ex: 0.5 MW de geração solar na barra 17
-            (32, 0.8, 'eolico'),  # Ex: 0.8 MW de geração eólica na barra 32
+            (15, 150, 'solar'),    # Ex: 150 MW de geração solar na barra 15
+            (500, 200, 'eolico'),   # Ex: 200 MW de geração eólica na barra 500
         ],
         'investimento_por_kw': {'solar': 1200, 'eolico': 1500},
         'custo_operacional_por_kwh': {'solar': 0.01, 'eolico': 0.02}
@@ -36,15 +38,12 @@ def configurar_cenario():
         'custo_geradores_convencionais_por_kwh': 0.05,
     }
     
-    # 4. --- ADIÇÃO: Configurações do Armazenamento de Energia (Baterias) ---
+    # 4. Configurações do Armazenamento de Energia (Baterias)
     config_storage = {
-        # Para adicionar uma nova bateria, adicione uma nova linha aqui.
         # Formato: (numero_da_barra, Potencia_MW, Capacidade_MWh, eficiencia_carga, eficiencia_descarga, soc_inicial)
         'unidades': [
-            # Bateria de 1 MW / 4 MWh na barra 18 com 95% de eficiência
-            (18, 1.0, 4.0, 0.95, 0.95, 0.5), # soc_inicial = 50%
-            # Bateria de 0.5 MW / 2 MWh na barra 30 com 90% de eficiência
-            (30, 0.5, 2.0, 0.90, 0.90, 0.2), # soc_inicial = 20%
+            # Bateria de 100 MW / 400 MWh na barra 100
+            (100, 100.0, 400.0, 0.95, 0.95, 0.5),
         ]
     }
     
