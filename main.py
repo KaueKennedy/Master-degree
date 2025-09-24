@@ -67,3 +67,5 @@ except Exception as e:
 finally:
     eng.quit()
     print("\nSessao MATLAB encerrada.")
+    print("\nSessao MATLAB encerrada.")
+    #teste
