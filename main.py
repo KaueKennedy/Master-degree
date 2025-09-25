@@ -5,335 +5,145 @@ import os
 import numpy as np
 
 # ##############################################################################
-# FASE 1: CONFIGURAÇÃO DO CENÁRIO E PARÂMETROS
-# Descrição: Bloco para definir todos os parâmetros de entrada da simulação.
-#            Edite os valores aqui para configurar diferentes cenários de estudo.
+# FASE 1: PREPARAÇÃO DO CENÁRIO E CRIAÇÃO DO ARQUIVO DE ENTRADA
+# Descrição: Python cria um arquivo .mat com os dados para o MATLAB.
 # ##############################################################################
+def preparar_cenario_e_criar_arquivo():
+    """
+    Prepara um dicionário com os dados do cenário e o salva em um arquivo .mat
+    para o MATLAB consumir.
+    """
+    print("FASE 1: Preparando dados do cenário no Python...")
 
+    # Nome do caso de estudo que o MATLAB deve carregar
+    nome_caso_matlab = 'case2746wop_TAMU_Updated'
 
-def configurar_cenario():
-    """Retorna os dicionários de configuração para a simulação."""
-    
-    # 1. Configuracoes dos Recursos Energeticos Distribuidos (DERs)
-    config_ders = {
-        'tipos': ['solar', 'eolico'],
-        # Use barras que existem no case2383wp (ex: 1 a 2383).
-        # As capacidades agora estão em centenas de MW.
-        'localizacao': [
-            (15, 150, 'solar'),    # Ex: 150 MW de geração solar na barra 15
-            (500, 200, 'eolico'),   # Ex: 200 MW de geração eólica na barra 500
-        ],
-        'investimento_por_kw': {'solar': 1200, 'eolico': 1500},
-        'custo_operacional_por_kwh': {'solar': 0.01, 'eolico': 0.02}
+    # Dados de exemplo para novos geradores (formato numérico puro)
+    ders_para_adicionar = np.array([
+        [500, 200.0],  # [barra, capacidade_MW]
+        [600, 150.0]
+    ])
+
+    # Cria um dicionário que será salvo no arquivo .mat
+    cenario_para_matlab = {
+        'nome_caso': nome_caso_matlab,
+        'ders_a_adicionar': ders_para_adicionar
     }
 
-    # 2. Configuracoes do Mecanismo de Compensacao
-    config_compensacao = {
-        'remuneracao_por_kwh': 0.10,
-    }
+    # Salva o dicionário no arquivo 'cenario.mat'
+    try:
+        scipy.io.savemat('cenario.mat', cenario_para_matlab)
+        print("   -> Arquivo 'cenario.mat' criado com sucesso.")
+    except Exception as e:
+        print(f"   -> Erro ao criar 'cenario.mat': {e}")
+        return False
 
-    # 3. Configuracoes Economicas Gerais
-    config_economicas = {
-        'custo_energia_consumidor_por_kwh': 0.15,
-        'custo_geradores_convencionais_por_kwh': 0.05,
-    }
-    
-    # 4. Configurações do Armazenamento de Energia (Baterias)
-    config_storage = {
-        # Formato: (numero_da_barra, Potencia_MW, Capacidade_MWh, eficiencia_carga, eficiencia_descarga, soc_inicial)
-        'unidades': [
-            # Bateria de 100 MW / 400 MWh na barra 100
-            (100, 100.0, 400.0, 0.95, 0.95, 0.5),
-        ]
-    }
-    
-    return config_ders, config_compensacao, config_economicas, config_storage
+    return True
 
 # ##############################################################################
-# FASE 2: LÓGICA DA SIMULAÇÃO E CRIAÇÃO DOS INDICADORES
-# Descrição: Esta função contém o script MATLAB.
-#            Edite a string dentro desta função para modificar a lógica de
-#            simulação ou para adicionar/remover o cálculo de indicadores.
+# FASE 2: COMANDO DE SIMULAÇÃO (EM MATLAB)
+# Descrição: Script MATLAB que lê o arquivo de cenário e cria um arquivo de resultados.
 # ##############################################################################
-
 def get_comando_matlab():
-    """Retorna a string com o comando MATLAB para a simulação e cálculo de indicadores."""
+    """
+    Retorna a string com o script MATLAB. Este script agora carrega o 'cenario.mat'.
+    """
+    print("FASE 2: Montando o comando de simulação do MATLAB...")
     
-    # --- ATENÇÃO: Verifique se este caminho absoluto para o arquivo .raw está correto ---
-    # Usamos barras duplas invertidas (\\) para compatibilidade com o Windows.
-    raw_file_path = '240busWECC_2018_PSS.raw'
-
-    comando_matlab = f"""
-        define_constants;
-        
-        % --- Carregamento e Correção do Estudo de Caso (WECC 240-bus) ---
+    comando_matlab = """
         try
-            % Tenta ler o arquivo original diretamente
-            mpc = psse2mpc('{raw_file_path}');
+            % 1. Limpa o ambiente e carrega os dados do cenário
+            clear;
+            load('cenario.mat', 'nome_caso', 'ders_a_adicionar');
+            
+            fprintf('   -> MATLAB leu ''cenario.mat'' com sucesso.\\n');
+
+            % 2. Carrega o caso de estudo base
+            mpc = eval(nome_caso);
+            fprintf('   -> MATLAB carregou o caso ''%s'' com %d barras.\\n', nome_caso, size(mpc.bus, 1));
+            
+            % 3. (Lógica de simulação será adicionada aqui no futuro)
+            % Por enquanto, apenas criamos um resultado de exemplo
+            
+            resultados_simulacao = struct('sucesso', 1, 'mensagem', 'Simulacao de teste bem-sucedida');
+            
+            % 4. Salva os resultados para o Python
+            save('resultados.mat', 'resultados_simulacao');
+            fprintf('   -> MATLAB salvou ''resultados.mat'' com sucesso.\\n');
+
         catch ME
-            % Se falhar por falta de SBASE, corrige o arquivo
-            if strcmp(ME.identifier, 'MATLAB:PSSE_PARSE:NoSBASE') || contains(ME.message, 'SBASE')
-                fprintf('Arquivo .raw original sem cabeçalho. Adicionando cabeçalho PSS/E v33...\\n');
-                
-                % Lê todo o conteúdo do arquivo
-                original_content = fileread('{raw_file_path}');
-                
-                % Cria a linha de cabeçalho padrão (IC, SBASE, REVISION, ...)
-                header_line = '0, 100.0, 33, 0, 1, 60.0     /  PSSE-33.2  WECC 2018 Summer Peak (Generated by Python)\\n';
-                
-                % Concatena o cabeçalho com o conteúdo original
-                new_content = [header_line, original_content];
-                
-                % Salva em um arquivo temporário
-                temp_file_path = 'temp_case_for_matlab.raw';
-                fileID = fopen(temp_file_path, 'w');
-                fprintf(fileID, '%s', new_content);
-                fclose(fileID);
-                
-                % Carrega o arquivo temporário e corrigido
-                mpc = psse2mpc(temp_file_path);
-            else
-                % Se for outro erro, apenas o relança
-                rethrow(ME);
-            end
+            fprintf('ERRO NO SCRIPT MATLAB:\\n%s\\n', ME.message);
         end
-        
-        % --- Lógica do Mecanismo de Compensação (Inserção de DERs) ---
-        num_ders = floor(size(config_ders, 1));
-        for i = 1:num_ders
-            bus_idx = config_ders(i, 1);
-            capacity_mw = config_ders(i, 2);
-            if ~ismember(bus_idx, mpc.bus(:, BUS_I))
-                error('MATLAB:BusNotFound', 'Bus %d for DER does not exist in the case file.', bus_idx);
-            end
-            new_gen_row = [bus_idx, capacity_mw, 0, 100, -100, 1.0, 100, 1, capacity_mw, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            mpc.gen = [mpc.gen; new_gen_row];
-            mpc.gencost = [mpc.gencost; [2, 0, 0, 3, 0, 0, 0]];
-        end
-
-        % --- Lógica de Inserção de Armazenamento ---
-        num_storage_units = size(config_storage, 1);
-        if num_storage_units > 0
-            st_data = zeros(num_storage_units, 22);
-            stor_data = zeros(num_storage_units, 21);
-            
-            for i = 1:num_storage_units
-                bus_idx  = config_storage(i, 1);
-                p_mw     = config_storage(i, 2);
-                e_mwh    = config_storage(i, 3);
-                ch_eff   = config_storage(i, 4);
-                dis_eff  = config_storage(i, 5);
-                soc_init = config_storage(i, 6);
-
-                if ~ismember(bus_idx, mpc.bus(:, BUS_I))
-                    error('MATLAB:BusNotFound', 'Bus %d for storage does not exist.', bus_idx);
-                end
-                
-                st_data(i, :) = [bus_idx, 0, 0, -1000, 1000, 0, 0.1, 1, p_mw, -p_mw, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-                stor_data(i, :) = [soc_init, ch_eff, dis_eff, 0.05, 1, 0, e_mwh, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            end
-            
-            mpc = addstorage(mpc, st_data, stor_data);
-        end
-        
-        % --- Execução do Fluxo de Potência ---
-        resultados = runpf(mpc);
-        
-        % --- Cálculo dos Indicadores ---
-        indicadores = struct();
-        
-        % Indicadores Técnicos
-        indicadores.tensao_min = min(resultados.bus(:, VM));
-        indicadores.tensao_max = max(resultados.bus(:, VM));
-        indicadores.tensao_media = mean(resultados.bus(:, VM));
-        
-        flow_limit = resultados.branch(:, RATE_A);
-        flow_abs = max(abs(resultados.branch(:, PF)), abs(resultados.branch(:, PT)));
-        congestionadas = flow_abs >= flow_limit & flow_limit > 0;
-        indicadores.congestionamento_percent = (sum(congestionadas) / size(resultados.branch, 1)) * 100;
-        
-        [loss_mw, loss_mvar] = get_losses(resultados);
-        indicadores.perdas_mw = sum(loss_mw);
-        indicadores.perdas_mvar = sum(loss_mvar);
-        
-        num_conv_gens = size(mpc.gen, 1) - num_ders;
-        conv_gens = mpc.gen(1:num_conv_gens, :);
-        total_cap_conv = sum(conv_gens(:, PMAX));
-        total_gen_conv = sum(resultados.gen(1:num_conv_gens, PG));
-        indicadores.fator_utilizacao_convencional = (total_gen_conv / total_cap_conv) * 100;
-        
-        indicadores.total_demanda_mw = sum(resultados.bus(:, PD));
-        if num_ders > 0
-            indicadores.total_gerado_renovavel_mw = sum(resultados.gen(end-num_ders+1:end, PG));
-        else
-            indicadores.total_gerado_renovavel_mw = 0;
-        end
-
-        % Indicadores Econômicos
-        custo_geracao_conv = total_gen_conv * 1000 * config_custo_convencional;
-        receita_ders = indicadores.total_gerado_renovavel_mw * 1000 * config_compensacao_remuneracao;
-        indicadores.custo_total_sistema = custo_geracao_conv - receita_ders;
-        indicadores.rentabilidade_produtores = receita_ders;
-        indicadores.impacto_fatura_consumidores = indicadores.total_demanda_mw * 1000 * config_custo_consumidor;
-
-        % --- Salvando Resultados ---
-        save('resultados.mat', 'resultados', 'indicadores');
     """
     return comando_matlab
 
 # ##############################################################################
-# FASE 3: APRESENTAÇÃO DOS RESULTADOS
-# Descrição: Esta função formata e exibe os indicadores calculados.
-#            Edite aqui para alterar como os resultados são mostrados no
-#            console ou salvos no arquivo de texto.
+# FASE 3: PROCESSAMENTO DOS RESULTADOS (EM PYTHON)
+# Descrição: Python carrega o arquivo de resultados e verifica sua integridade.
 # ##############################################################################
-
-def apresentar_resultados(dados_carregados):
-    """Funcao para apresentar os resultados dos indicadores em formato de tabela."""
-    if 'indicadores' not in dados_carregados:
-        print("Indicadores nao encontrados no arquivo de resultados do MATLAB.")
-        return
-
-    indicadores = dados_carregados['indicadores'][0, 0]
+def processar_resultados():
+    """
+    Carrega o arquivo 'resultados.mat' criado pelo MATLAB e verifica seu conteúdo.
+    """
+    print("\nFASE 3: Lendo o arquivo de resultados no Python...")
     
-    output_lines = []
-    output_lines.append("--- Resultados dos Indicadores da Simulacao ---")
-    output_lines.append("\n--- Indicadores Tecnicos ---")
-    
-    tensao_min = indicadores['tensao_min'][0][0]
-    tensao_max = indicadores['tensao_max'][0][0]
-    tensao_media = indicadores['tensao_media'][0][0]
-    output_lines.append(f"Niveis de Tensao nas Barras (p.u.): Min={tensao_min:.4f}, Max={tensao_max:.4f}, Media={tensao_media:.4f}")
-
-    congestionamento = indicadores['congestionamento_percent'][0][0]
-    output_lines.append(f"Congestionamento das Linhas de Transmissao: {congestionamento:.2f}% das linhas operando no limite.")
-
-    perdas_mw = indicadores['perdas_mw'][0][0]
-    perdas_mvar = indicadores['perdas_mvar'][0][0]
-    output_lines.append(f"Perdas de Potencia no Rede: {perdas_mw:.4f} MW (Ativa), {perdas_mvar:.4f} MVar (Reativa)")
-
-    fator_utilizacao = indicadores['fator_utilizacao_convencional'][0][0]
-    output_lines.append(f"Fator de Utilizacao dos Geradores Convencionais: {fator_utilizacao:.2f}%")
-
-    total_demanda = indicadores['total_demanda_mw'][0][0]
-    total_gerado_renovavel = indicadores['total_gerado_renovavel_mw'][0][0]
-    penetracao_renovavel = (total_gerado_renovavel / total_demanda) * 100 if total_demanda > 0 else 0
-    output_lines.append(f"Utilizacao de Fontes Renovaveis: {penetracao_renovavel:.2f}% da demanda total.")
-    
-    output_lines.append("\n--- Indicadores Economicos ---")
-    custo_total = indicadores['custo_total_sistema'][0][0]
-    output_lines.append(f"Custo Total do Sistema: ${custo_total:,.2f}")
-    
-    rentabilidade_produtores = indicadores['rentabilidade_produtores'][0][0]
-    output_lines.append(f"Rentabilidade para os Produtores Autonomos (Receita): ${rentabilidade_produtores:,.2f}")
-    
-    impacto_consumidores = indicadores['impacto_fatura_consumidores'][0][0]
-    output_lines.append(f"Impacto na Fatura dos Consumidores (Custo Total): ${impacto_consumidores:,.2f}")
-
-    output_lines.append("\n--- Indicadores Sociais e Ambientais (Exemplos) ---")
-    output_lines.append("Distribuicao da Riqueza Energetica: (a ser implementado com base em dados socioeconomicos)")
-    output_lines.append("Incentivo para Fontes de Energia Limpa: (a ser implementado com base em politicas)")
-    output_lines.append("Resiliencia Local: (a ser implementado com base em topologia e cenarios de falha)")
-    
-    for line in output_lines:
-        print(line)
+    try:
+        dados_do_matlab = scipy.io.loadmat('resultados.mat')
+        print("   -> Arquivo 'resultados.mat' lido com sucesso pelo Python.")
         
-    with open('resultados_indicadores.txt', 'w') as f:
-        for line in output_lines:
-            f.write(line + '\n')
-    print("\nResultados dos indicadores salvos em 'resultados_indicadores.txt'")
+        # Verifica se a estrutura de resultados esperada está presente
+        if 'resultados_simulacao' in dados_do_matlab:
+            print("   -> Estrutura 'resultados_simulacao' encontrada no arquivo.")
+            
+            # Acessa os dados (lembrando da estrutura aninhada do scipy.io)
+            mensagem = dados_do_matlab['resultados_simulacao'][0, 0]['mensagem'][0]
+            print(f"   -> Mensagem do MATLAB: '{mensagem}'")
+            return True
+        else:
+            print("   -> ERRO: Estrutura 'resultados_simulacao' não encontrada.")
+            return False
+            
+    except FileNotFoundError:
+        print("   -> ERRO: O arquivo 'resultados.mat' não foi encontrado. A simulação no MATLAB pode ter falhado.")
+        return False
+    except Exception as e:
+        print(f"   -> ERRO ao ler 'resultados.mat' no Python: {e}")
+        return False
 
 # ##############################################################################
-# FASE 4: EXECUÇÃO PRINCIPAL
-# Descrição: Bloco principal que orquestra a comunicação com o MATLAB e
-#            chama as outras fases. Normalmente, não é necessário editar
-#            esta seção.
+# FASE 4: ORQUESTRADOR PRINCIPAL
 # ##############################################################################
-
 def main():
-    """Função principal para executar a simulação completa."""
-    # FASE 1: Carrega as configurações
-    config_ders, config_compensacao, config_economicas, config_storage = configurar_cenario()
+    """Função principal para executar o fluxo completo."""
     
-    print("Iniciando sessao MATLAB...")
+    # FASE 1
+    if not preparar_cenario_e_criar_arquivo():
+        return # Para a execução se a criação do arquivo falhar
+
+    # FASE 2
+    print("\nIniciando comunicação com o MATLAB...")
     try:
         eng = matlab.engine.start_matlab()
-    except Exception as e:
-        print(f"Erro ao iniciar o MATLAB: {e}")
-        sys.exit()
-
-    # Adiciona o Matpower ao path do MATLAB
-    try:
-        # ATENÇÃO: Use duas barras invertidas para o caminho no Windows
-        matpower_path = eng.fullfile(r'C:\\Users\\KKCOD\\OneDrive - Université Laval\\Recherche\\codes\\matpower8.1', nargout=1)
+        eng.addpath(os.getcwd(), nargout=0)
+        matpower_path = r'C:\\Users\\KKCOD\\OneDrive - Université Laval\\Recherche\\codes\\matpower8.1'
         eng.addpath(eng.genpath(matpower_path), nargout=0)
-    except Exception as e:
-        print(f"Erro ao adicionar o MATPOWER ao path do MATLAB: {e}")
-        eng.quit()
-        sys.exit()
 
-    # Passa as configuracoes do Python para o MATLAB
-    try:
-        # --- CORREÇÃO: Converte as listas de tuplas para listas de listas numéricas ---
-        ders_data_for_matlab = [list(item[:-1]) for item in config_ders['localizacao']]
-        storage_data_for_matlab = [list(item) for item in config_storage['unidades']]
-
-        if ders_data_for_matlab:
-            eng.workspace['config_ders'] = matlab.double(ders_data_for_matlab)
-        else:
-            eng.workspace['config_ders'] = matlab.double([])
-            
-        if storage_data_for_matlab:
-            eng.workspace['config_storage'] = matlab.double(storage_data_for_matlab)
-        else:
-            eng.workspace['config_storage'] = matlab.double([])
-
-        eng.workspace['config_compensacao_remuneracao'] = config_compensacao['remuneracao_por_kwh']
-        eng.workspace['config_custo_consumidor'] = config_economicas['custo_energia_consumidor_por_kwh']
-        eng.workspace['config_custo_convencional'] = config_economicas['custo_geradores_convencionais_por_kwh']
-    except Exception as e:
-        print(f"Erro ao passar configuracoes para o MATLAB: {e}")
-        eng.quit()
-        sys.exit()
-
-    # FASE 2: Obtém e executa o comando MATLAB
-    comando_matlab = get_comando_matlab()
-    print("Executando simulação no MATLAB...")
-    try:
+        comando_matlab = get_comando_matlab()
+        print("Executando script no MATLAB...")
         eng.eval(comando_matlab, nargout=0)
-        print("Simulacao concluida no MATLAB. Arquivo 'resultados.mat' gerado com indicadores.")
+
     except Exception as e:
-        print(f"Erro durante a execucao do comando MATLAB: {e}")
-        eng.quit()
-        sys.exit()
-
-    # FASE 3: Carrega e apresenta os resultados
-    print("Tentando carregar os resultados no Python...")
-    try:
-        dados_carregados = scipy.io.loadmat('resultados.mat')
-        
-        if 'resultados' in dados_carregados:
-            print("Sucesso! A estrutura 'resultados' foi encontrada no arquivo.")
-            
-            resultados_data = dados_carregados['resultados']
-            bus_matrix = resultados_data['bus'][0,0]
-            num_buses = bus_matrix.shape[0]
-            print(f"O caso de estudo contém {num_buses} barras.")
-            
-            apresentar_resultados(dados_carregados)
-            
-            print("\nO Python agora pode trabalhar com os dados sem problemas.")
-        else:
-            print("Falha: A estrutura 'resultados' nao foi encontrada no arquivo.")
-
-    except FileNotFoundError:
-        print("Falha: O arquivo 'resultados.mat' nao foi encontrado.")
-    except Exception as e:
-        print(f"Falha: Erro ao carregar o arquivo .mat. Detalhes: {e}")
-
+        print(f"Ocorreu um erro na comunicação com o MATLAB: {e}")
     finally:
-        eng.quit()
-        print("\nSessao MATLAB encerrada.")
+        if 'eng' in locals():
+            eng.quit()
+            print("Sessão MATLAB encerrada.")
+            
+    # FASE 3
+    if processar_resultados():
+        print("\nFLUXO DE ARQUIVOS VALIDADO: Python criou -> MATLAB leu -> MATLAB criou -> Python leu.")
+    else:
+        print("\nFALHA NO FLUXO DE ARQUIVOS. Verifique as mensagens de erro acima.")
 
 if __name__ == "__main__":
     main()
