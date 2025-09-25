@@ -248,37 +248,115 @@ def get_comando_matlab():
     return comando_matlab
 
 # ##############################################################################
-# FASE 3: PROCESSAMENTO DOS RESULTADOS (EM PYTHON)
-# Descrição: Python carrega o arquivo de resultados e verifica sua integridade.
+# FASE 3: PROCESSAMENTO DOS RESULTADOS E CÁLCULO DOS INDICADORES
+# Descrição: Python carrega o arquivo de resultados do MATLAB, extrai os dados
+#            brutos e calcula os indicadores de desempenho.
 # ##############################################################################
-def processar_resultados():
+
+def calcular_indicadores(resultados, mpc_original, configs):
     """
-    Carrega o arquivo 'resultados.mat' criado pelo MATLAB e verifica seu conteúdo.
+    Calcula os indicadores técnicos e econômicos a partir dos resultados brutos.
+    Esta função é chamada pela 'processar_resultados'.
     """
-    print("\nFASE 3: Lendo o arquivo de resultados no Python...")
+    print("   -> Calculando indicadores de desempenho no Python...")
+    indicadores = {}
+    
+    # --- Extração de dados para facilitar o acesso ---
+    bus_data = resultados['bus']
+    branch_data = resultados['branch']
+    gen_data = resultados['gen']
+    
+    config_ders = configs['ders']
+    config_compensacao = configs['compensacao']
+    config_economicas = configs['economicas']
+
+    # --- Constantes de Colunas (para facilitar a leitura) ---
+    VM, PD, QD = 7, 2, 3
+    RATE_A, PF, PT = 5, 13, 15
+    PG, QG = 1, 2
+    
+    # --- Indicadores Técnicos ---
+    indicadores['tensao_min'] = np.min(bus_data[:, VM])
+    indicadores['tensao_max'] = np.max(bus_data[:, VM])
+    indicadores['tensao_media'] = np.mean(bus_data[:, VM])
+
+    flow_limit = branch_data[:, RATE_A]
+    # Filtra linhas sem limite (valor 0) para evitar divisões por zero ou falsos positivos
+    linhas_com_limite = flow_limit > 0
+    flow_abs = np.maximum(np.abs(branch_data[linhas_com_limite, PF]), np.abs(branch_data[linhas_com_limite, PT]))
+    congestionadas = flow_abs >= flow_limit[linhas_com_limite]
+    indicadores['congestionamento_percent'] = (np.sum(congestionadas) / np.sum(linhas_com_limite)) * 100 if np.sum(linhas_com_limite) > 0 else 0
+
+    total_gerado_mw = np.sum(gen_data[:, PG])
+    total_carga_mw = np.sum(bus_data[:, PD])
+    indicadores['perdas_mw'] = total_gerado_mw - total_carga_mw
+
+    # --- Indicadores Econômicos ---
+    num_gens_originais = mpc_original['gen'].shape[0]
+    num_ders = len(config_ders['unidades'])
+    
+    total_gen_conv_mw = np.sum(gen_data[:num_gens_originais, PG])
+    total_gerado_renovavel_mw = np.sum(gen_data[num_gens_originais : num_gens_originais + num_ders, PG])
+
+    indicadores['total_demanda_mw'] = total_carga_mw
+    indicadores['total_gerado_renovavel_mw'] = total_gerado_renovavel_mw
+    
+    # O custo do OPF já considera o custo de todos os geradores (convencionais e DERs com custo operacional)
+    # A função objetivo 'f' em resultados contém o custo total minimizado
+    indicadores['custo_total_sistema_operacao'] = resultados['f'][0][0]
+
+    # A rentabilidade é a receita pela venda de energia
+    # Para simplificar, consideramos a remuneração de toda a energia gerada
+    rentabilidade = total_gerado_renovavel_mw * 1000 * config_compensacao['remuneração_credito_mwh'][0] # Usando o preço da primeira hora como exemplo
+    indicadores['rentabilidade_produtores_receita'] = rentabilidade
+
+    # O impacto é o custo total para atender a demanda
+    impacto_consumidores = indicadores['total_demanda_mw'] * 1000 * config_economicas['preco_compra_energia_grid_mwh'][0] # Usando o preço da primeira hora como exemplo
+    indicadores['impacto_fatura_consumidores'] = impacto_consumidores
+    
+    print("   -> Cálculo de indicadores concluído.")
+    return indicadores
+
+
+def processar_resultados(configs):
+    """
+    Carrega o arquivo 'resultados.mat', verifica sua integridade e chama
+    a função para calcular os indicadores.
+    """
+    print("\nFASE 3: Processando os resultados da simulação...")
     
     try:
-        dados_do_matlab = scipy.io.loadmat('resultados.mat')
+        dados_matlab = scipy.io.loadmat('resultados.mat')
         print("   -> Arquivo 'resultados.mat' lido com sucesso pelo Python.")
         
-        # Verifica se a estrutura de resultados esperada está presente
-        if 'resultados_simulacao' in dados_do_matlab:
-            print("   -> Estrutura 'resultados_simulacao' encontrada no arquivo.")
-            
-            # Acessa os dados (lembrando da estrutura aninhada do scipy.io)
-            mensagem = dados_do_matlab['resultados_simulacao'][0, 0]['mensagem'][0]
-            print(f"   -> Mensagem do MATLAB: '{mensagem}'")
-            return True
+        # Verifica se a simulação no MATLAB foi bem-sucedida
+        if 'resultados' in dados_matlab:
+            resultados_struct = dados_matlab['resultados'][0, 0]
+            if resultados_struct['success'][0, 0] == 1:
+                print("   -> A simulação OPF convergiu com sucesso.")
+                
+                # Extrai os resultados e o caso original para um formato mais fácil de usar
+                resultados = {n: resultados_struct[n] for n in resultados_struct.dtype.names}
+                
+                mpc_original_struct = dados_matlab['mpc_original'][0,0]
+                mpc_original = {n: mpc_original_struct[n] for n in mpc_original_struct.dtype.names}
+                
+                # Chama a função que faz o cálculo dos indicadores
+                indicadores = calcular_indicadores(resultados, mpc_original, configs)
+                return indicadores
+            else:
+                print("   -> ERRO: A simulação OPF no MATLAB não convergiu.")
+                return None
         else:
-            print("   -> ERRO: Estrutura 'resultados_simulacao' não encontrada.")
-            return False
+            print("   -> ERRO: A estrutura 'resultados' não foi encontrada no arquivo .mat.")
+            return None
             
     except FileNotFoundError:
-        print("   -> ERRO: O arquivo 'resultados.mat' não foi encontrado. A simulação no MATLAB pode ter falhado.")
-        return False
+        print("   -> ERRO: O arquivo 'resultados.mat' não foi encontrado.")
+        return None
     except Exception as e:
-        print(f"   -> ERRO ao ler 'resultados.mat' no Python: {e}")
-        return False
+        print(f"   -> ERRO ao processar o arquivo 'resultados.mat' no Python: {e}")
+        return None
 
 # ##############################################################################
 # FASE 4: ORQUESTRADOR PRINCIPAL
