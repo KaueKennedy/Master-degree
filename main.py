@@ -1,8 +1,7 @@
 import pandapower as pp
-# --- CORREÇÃO AQUI: A importação da função mudou de lugar em versões recentes ---
-from pandapower.converter.matpower import from_matpower
+from pandapower.converter.matpower.from_mpc import *
 import os
-import numpy as np # Importando para uso futuro
+import numpy as np
 
 # ##############################################################################
 # FASE 1: CONFIGURAÇÃO DO CENÁRIO
@@ -74,7 +73,7 @@ def simular_rede(caminho_arquivo, configs):
             return None
         
         # A chamada da função é a mesma, mas a importação mudou
-        net = from_matpower(caminho_arquivo)
+        net = from_mpc(caminho_arquivo)
         print(f"   -> Sucesso! Rede '{net.name}' com {len(net.bus)} barras foi carregada.")
     except Exception as e:
         print(f"   -> ERRO ao ler o arquivo do caso de estudo: {e}")
