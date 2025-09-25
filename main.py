@@ -1,6 +1,6 @@
 import pandapower as pp
 # --- CORREÇÃO AQUI: A importação da função mudou de lugar em versões recentes ---
-from pandapower.from_matpower import from_matpower
+from pandapower.converter.matpower import from_matpower
 import os
 import numpy as np # Importando para uso futuro
 
@@ -73,7 +73,7 @@ def simular_rede(caminho_arquivo, configs):
             print(f"   -> Diretório de trabalho atual: {os.getcwd()}")
             return None
         
-        # --- CORREÇÃO AQUI: A chamada da função é a mesma, mas a importação mudou ---
+        # A chamada da função é a mesma, mas a importação mudou
         net = from_matpower(caminho_arquivo)
         print(f"   -> Sucesso! Rede '{net.name}' com {len(net.bus)} barras foi carregada.")
     except Exception as e:
