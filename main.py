@@ -1,6 +1,8 @@
 import pandapower as pp
-import pandapower.converter as cvt
+# --- CORREÇÃO AQUI: A importação da função mudou de lugar em versões recentes ---
+from pandapower.from_matpower import from_matpower
 import os
+import numpy as np # Importando para uso futuro
 
 # ##############################################################################
 # FASE 1: CONFIGURAÇÃO DO CENÁRIO
@@ -13,7 +15,8 @@ def configurar_cenario():
     print("FASE 1: Configurando o cenário...")
     
     # Caminho para o arquivo do caso de estudo no formato MATPOWER (.m)
-    caminho_arquivo_caso = 'case2746wop_TAMU_Updated.m'
+    # Garanta que este caminho está correto em relação a onde você executa o script.
+    caminho_arquivo_caso = 'matpower8.1/data/case2746wop_TAMU_Updated.m'
 
     # 1. Configuracoes das fontes renováveis (DERs)
     config_ders = {
@@ -67,10 +70,11 @@ def simular_rede(caminho_arquivo, configs):
         print(f"   -> Lendo o arquivo: {caminho_arquivo}")
         if not os.path.exists(caminho_arquivo):
             print(f"   -> ERRO: Arquivo não encontrado em '{caminho_arquivo}'")
+            print(f"   -> Diretório de trabalho atual: {os.getcwd()}")
             return None
         
-        # O pandapower converte o formato do MATPOWER para sua estrutura interna
-        net = cvt.from_matpower(caminho_arquivo)
+        # --- CORREÇÃO AQUI: A chamada da função é a mesma, mas a importação mudou ---
+        net = from_matpower(caminho_arquivo)
         print(f"   -> Sucesso! Rede '{net.name}' com {len(net.bus)} barras foi carregada.")
     except Exception as e:
         print(f"   -> ERRO ao ler o arquivo do caso de estudo: {e}")
@@ -110,8 +114,8 @@ def calcular_indicadores(net, configs):
     print("\nFASE 3: Calculando indicadores...")
     indicadores = {}
 
-    if net is None or 'res_bus' not in net:
-        print("   -> Simulação inválida, não é possível calcular indicadores.")
+    if net is None or net.res_bus.empty:
+        print("   -> Simulação inválida ou não convergiu. Não é possível calcular indicadores.")
         return indicadores
         
     # Indicador Simples: Perdas Totais de Potência Ativa na Rede
@@ -139,7 +143,11 @@ def apresentar_resultados(indicadores):
         return
 
     print("\n--- Impactos da Inserção de DERs e Baterias ---")
-    print(f"  - Perdas Totais na Rede: {indicadores.get('perdas_totais_mw', 'N/A'):.2f} MW")
+    perdas = indicadores.get('perdas_totais_mw')
+    if perdas is not None:
+        print(f"  - Perdas Totais na Rede: {perdas:.2f} MW")
+    else:
+        print("  - Perdas Totais na Rede: N/A")
     # Futuramente, outros indicadores serão adicionados aqui
 
 # ##############################################################################
