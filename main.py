@@ -1,29 +1,25 @@
 import pandapower as pp
-from pandapower.converter.matpower.from_mpc import *
+import pandapower.networks as nw
 import os
 import numpy as np
 
 # ##############################################################################
 # FASE 1: CONFIGURAÇÃO DO CENÁRIO
-# Descrição: Defina aqui todos os parâmetros de entrada da simulação.
 # ##############################################################################
 def configurar_cenario():
     """
     Configura e retorna todos os parâmetros para um cenário de simulação.
     """
     print("FASE 1: Configurando o cenário...")
-    
-    # Caminho para o arquivo do caso de estudo no formato MATPOWER (.m)
-    # Garanta que este caminho está correto em relação a onde você executa o script.
-    caminho_arquivo_caso = 'matpower8.1/data/case2746wop_TAMU_Updated.m'
 
     # 1. Configuracoes das fontes renováveis (DERs)
     config_ders = {
         'unidades': [
             # Formato: (id_da_barra, capacidade_mw, nome, tipo_der)
-            (500, 200, 'Solar_Farm_1', 'solar'),
-            (120, 150, 'Wind_Turbine_1', 'eolico'),
-            (2105, 50, 'Solar_Farm_2', 'solar'),
+            # Barras válidas para o case118 (1 a 118)
+            (10, 50, 'Solar_Farm_1', 'solar'),
+            (25, 40, 'Wind_Turbine_1', 'eolico'),
+            (80, 30, 'Solar_Farm_2', 'solar'),
         ]
     }
 
@@ -31,65 +27,79 @@ def configurar_cenario():
     config_storage = {
         'unidades': [
             # Formato: (barra, potencia_mw, capacidade_mwh, nome)
-            (100, 100.0, 400.0, 'Bateria_1'),
-            (88,  50.0, 200.0, 'Bateria_2'),
-            (1542, 75.0, 300.0, 'Bateria_3'),
+            (12, 20.0, 80.0, 'Bateria_1'),
+            (37, 15.0, 60.0, 'Bateria_2'),
+            (100, 10.0, 40.0, 'Bateria_3'),
         ]
     }
     
     # 3. Configuracoes do Mecanismo de Compensacao (Net Metering)
-    #    Nesta fase inicial, apenas definimos a tarifa para o cálculo do impacto.
     config_compensacao = {
         'modelo': 'Net Metering',
-        'remuneracao_credito_mwh': 75.0,  # Ex: $75 por MWh de energia injetada
+        'remuneracao_credito_mwh': 75.0,
     }
 
-    # Agrupa todas as configurações em um único dicionário para facilitar o uso
     configs = {
         "ders": config_ders,
         "storage": config_storage,
         "compensacao": config_compensacao
     }
     
-    return caminho_arquivo_caso, configs
+    # Retorna apenas um dicionário de configurações
+    return configs
 
 # ##############################################################################
 # FASE 2: SIMULAÇÃO DA REDE ELÉTRICA (EM PYTHON)
-# Descrição: Carrega a rede, adiciona os novos ativos e roda a simulação.
 # ##############################################################################
-def simular_rede(caminho_arquivo, configs):
+def simular_rede(configs):
     """
-    Carrega o caso de estudo, adiciona os ativos (DERs e baterias) e
+    Carrega um caso de estudo nativo, adiciona os ativos (DERs e baterias) e
     executa a simulação de fluxo de potência.
     """
     print("\nFASE 2: Iniciando a simulação da rede elétrica...")
 
-    # 1. Carrega o caso de estudo diretamente do arquivo .m
+    # 1. Carrega o caso de estudo diretamente da biblioteca pandapower
     try:
-        print(f"   -> Lendo o arquivo: {caminho_arquivo}")
-        if not os.path.exists(caminho_arquivo):
-            print(f"   -> ERRO: Arquivo não encontrado em '{caminho_arquivo}'")
-            print(f"   -> Diretório de trabalho atual: {os.getcwd()}")
-            return None
-        
-        # A chamada da função é a mesma, mas a importação mudou
-        net = from_mpc(caminho_arquivo)
+        print("   -> Carregando 'case118' da biblioteca nativa do pandapower...")
+        net = nw.case118()
         print(f"   -> Sucesso! Rede '{net.name}' com {len(net.bus)} barras foi carregada.")
     except Exception as e:
-        print(f"   -> ERRO ao ler o arquivo do caso de estudo: {e}")
+        print(f"   -> ERRO ao carregar o caso de estudo nativo: {e}")
         return None
 
-    # 2. Adiciona os DERs à rede (como geradores estáticos)
+    # 2. Adiciona os DERs à rede
     print("   -> Adicionando DERs à rede...")
-    for id_der, der_info in enumerate(configs['ders']['unidades']):
+    for der_info in configs['ders']['unidades']:
         barra, capacidade_mw, nome, tipo = der_info
-        pp.create_gen(net, bus=barra, p_mw=capacidade_mw, name=nome, tags=tipo)
+        
+        # --- CORREÇÃO IMPORTANTE AQUI ---
+        # Pandapower usa indexação base 0. Os nomes das barras são base 1.
+        # Encontramos o índice interno da barra.
+        bus_index = net.bus[net.bus.name == barra].index
+        
+        if bus_index.empty:
+            print(f"      -> AVISO: Barra {barra} não encontrada. Pulando DER {nome}.")
+            continue
+
+        # Remove qualquer gerador existente nesta barra para evitar conflitos
+        gens_na_barra = net.gen[net.gen.bus == bus_index[0]].index
+        if not gens_na_barra.empty:
+            print(f"      -> Removendo {len(gens_na_barra)} gerador(es) existente(s) na barra {barra}.")
+            net.gen.drop(gens_na_barra, inplace=True)
+            
+        pp.create_gen(net, bus=bus_index[0], p_mw=capacidade_mw, name=nome, tags=tipo)
 
     # 3. Adiciona as Baterias à rede
     print("   -> Adicionando Baterias à rede...")
-    for id_bat, bat_info in enumerate(configs['storage']['unidades']):
+    for bat_info in configs['storage']['unidades']:
         barra, potencia_mw, capacidade_mwh, nome = bat_info
-        pp.create_storage(net, bus=barra, p_mw=potencia_mw, max_e_mwh=capacidade_mwh, name=nome)
+        bus_index = net.bus[net.bus.name == barra].index
+
+        if bus_index.empty:
+            print(f"      -> AVISO: Barra {barra} não encontrada. Pulando Bateria {nome}.")
+            continue
+            
+        pp.create_storage(net, bus=bus_index[0], p_mw=potencia_mw, max_e_mwh=capacidade_mwh, name=nome)
         
     # 4. Executa a simulação de fluxo de potência
     print("   -> Executando a simulação de fluxo de potência (runpp)...")
@@ -104,7 +114,6 @@ def simular_rede(caminho_arquivo, configs):
 
 # ##############################################################################
 # FASE 3: CÁLCULO DE INDICADORES
-# Descrição: Calcula os indicadores a partir dos resultados da simulação.
 # ##############################################################################
 def calcular_indicadores(net, configs):
     """
@@ -118,7 +127,6 @@ def calcular_indicadores(net, configs):
         return indicadores
         
     # Indicador Simples: Perdas Totais de Potência Ativa na Rede
-    # A diferença entre a geração total e a carga total.
     geracao_total_mw = net.res_gen.p_mw.sum() + net.res_ext_grid.p_mw.sum()
     carga_total_mw = net.res_load.p_mw.sum()
     perdas_totais_mw = geracao_total_mw - carga_total_mw
@@ -131,7 +139,6 @@ def calcular_indicadores(net, configs):
 
 # ##############################################################################
 # FASE 4: APRESENTAÇÃO DOS RESULTADOS
-# Descrição: Formata e exibe os indicadores calculados.
 # ##############################################################################
 def apresentar_resultados(indicadores):
     """Apresenta os resultados dos indicadores calculados."""
@@ -147,25 +154,23 @@ def apresentar_resultados(indicadores):
         print(f"  - Perdas Totais na Rede: {perdas:.2f} MW")
     else:
         print("  - Perdas Totais na Rede: N/A")
-    # Futuramente, outros indicadores serão adicionados aqui
 
 # ##############################################################################
 # FASE 5: ORQUESTRADOR PRINCIPAL
-# Descrição: Bloco principal que executa todas as fases em ordem.
 # ##############################################################################
 def main():
     """Função principal para executar a simulação completa."""
     
-    # FASE 1: Obter configurações do cenário
-    caminho_caso, configs = configurar_cenario()
+    # FASE 1
+    configs = configurar_cenario()
 
-    # FASE 2: Simular a rede elétrica
-    net_simulada = simular_rede(caminho_caso, configs)
+    # FASE 2
+    net_simulada = simular_rede(configs)
 
-    # FASE 3: Calcular indicadores com base nos resultados
+    # FASE 3
     indicadores = calcular_indicadores(net_simulada, configs)
     
-    # FASE 4: Apresentar os resultados finais
+    # FASE 4
     apresentar_resultados(indicadores)
 
 if __name__ == "__main__":
