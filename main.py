@@ -180,38 +180,69 @@ def preparar_cenario_e_criar_arquivo():
     return nome_caso_matlab, configs
 
 # ##############################################################################
-# FASE 2: COMANDO DE SIMULAÇÃO (EM MATLAB)
-# Descrição: Script MATLAB que lê o arquivo de cenário e cria um arquivo de resultados.
+# FASE 2: SIMULAÇÃO NO MATLAB
+# Descrição: Contém o script que será executado pelo MATLAB, com base nos
+#            arquivos gerados pela FASE 1.
 # ##############################################################################
 def get_comando_matlab():
     """
-    Retorna a string com o script MATLAB. Este script agora carrega o 'cenario.mat'.
+    Retorna a string com o script MATLAB. Este script carrega o 'cenario.mat',
+    modifica o caso de estudo e executa a simulação.
     """
     print("FASE 2: Montando o comando de simulação do MATLAB...")
     
-    comando_matlab = """
+    comando_matlab = f"""
         try
-            % 1. Limpa o ambiente e carrega os dados do cenário
-            clear;
-            load('cenario.mat', 'nome_caso', 'ders_a_adicionar');
+            % --- 1. Carregamento e Preparação ---
+            define_constants;
+            
+            % Carrega os dados do cenário preparados pelo Python
+            load('cenario.mat', 'nome_caso', 'ders_a_adicionar', 'storage_st_data', 'storage_stor_data');
             
             fprintf('   -> MATLAB leu ''cenario.mat'' com sucesso.\\n');
 
-            % 2. Carrega o caso de estudo base
+            % Carrega o caso de estudo base dinamicamente
             mpc = eval(nome_caso);
-            fprintf('   -> MATLAB carregou o caso ''%s'' com %d barras.\\n', nome_caso, size(mpc.bus, 1));
+            mpc_original = mpc; % Salva uma cópia para referência futura
+
+            % --- 2. Adição de Recursos Distribuídos (DERs) ---
+            fprintf('   -> Adicionando %d DERs ao caso de estudo...\\n', size(ders_a_adicionar, 1));
+            for i = 1:size(ders_a_adicionar, 1)
+                bus_idx = ders_a_adicionar(i, 1);
+                capacity_mw = ders_a_adicionar(i, 2);
+                
+                % Define a linha do novo gerador
+                new_gen_row = [bus_idx, capacity_mw, 0, 1000, -1000, 1.0, 100, 1, capacity_mw, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                
+                % Adiciona o gerador e seu custo ao mpc
+                mpc.gen = [mpc.gen; new_gen_row];
+                mpc.gencost = [mpc.gencost; [2, 0, 0, 3, 0, 0, 0, 0]]; % Custo com 8 colunas
+            end
             
-            % 3. (Lógica de simulação será adicionada aqui no futuro)
-            % Por enquanto, apenas criamos um resultado de exemplo
+            % --- 3. Adição de Sistemas de Armazenamento (Baterias) ---
+            if exist('storage_st_data', 'var') && ~isempty(storage_st_data)
+                fprintf('   -> Adicionando %d unidades de armazenamento...\\n', size(storage_st_data, 1));
+                % A função 'addstorage' é parte do MOST (MATPOWER Optimal Scheduling Tool)
+                mpc = addstorage(mpc, storage_st_data, storage_stor_data);
+            end
+
+            % --- 4. Execução da Simulação ---
+            fprintf('   -> Executando o Fluxo de Potência Ótimo (runopf)...\\n');
+            % Define opções para o OPF para evitar saídas detalhadas no console
+            mpopt = mpoption('verbose', 0, 'out.all', 0);
+            resultados = runopf(mpc, mpopt);
             
-            resultados_simulacao = struct('sucesso', 1, 'mensagem', 'Simulacao de teste bem-sucedida');
-            
-            % 4. Salva os resultados para o Python
-            save('resultados.mat', 'resultados_simulacao');
-            fprintf('   -> MATLAB salvou ''resultados.mat'' com sucesso.\\n');
+            % --- 5. Salvando os Resultados ---
+            if resultados.success
+                fprintf('   -> Simulação bem-sucedida! Salvando resultados...\\n');
+                save('resultados.mat', 'resultados', 'mpc_original');
+            else
+                fprintf('   -> ERRO: A simulação OPF não convergiu.\\n');
+            end
 
         catch ME
-            fprintf('ERRO NO SCRIPT MATLAB:\\n%s\\n', ME.message);
+            % Captura e exibe qualquer erro que ocorra no script MATLAB
+            fprintf('ERRO NO SCRIPT MATLAB:\\n  Arquivo: %s\\n  Linha: %d\\n  Mensagem: %s\\n', ME.stack(1).file, ME.stack(1).line, ME.message);
         end
     """
     return comando_matlab
