@@ -16,10 +16,10 @@ def configurar_cenario():
     config_ders = {
         'unidades': [
             # Formato: (id_da_barra, capacidade_mw, nome, tipo_der)
-            # Barras válidas para o case118 (1 a 118)
-            (10, 50, 'Solar_Farm_1', 'solar'),
-            (25, 40, 'Wind_Turbine_1', 'eolico'),
-            (80, 30, 'Solar_Farm_2', 'solar'),
+            # Barras escolhidas do caso de 1354 barras
+            (100, 150, 'Solar_Farm_1', 'solar'),
+            (500, 200, 'Wind_Turbine_1', 'eolico'),
+            (1000, 100, 'Solar_Farm_2', 'solar'),
         ]
     }
 
@@ -27,9 +27,10 @@ def configurar_cenario():
     config_storage = {
         'unidades': [
             # Formato: (barra, potencia_mw, capacidade_mwh, nome)
-            (12, 20.0, 80.0, 'Bateria_1'),
-            (37, 15.0, 60.0, 'Bateria_2'),
-            (100, 10.0, 40.0, 'Bateria_3'),
+            # Pares com os DERs nas mesmas barras
+            (100, 75.0, 300.0, 'Bateria_1'),
+            (500, 100.0, 400.0, 'Bateria_2'),
+            (1000, 50.0, 200.0, 'Bateria_3'),
         ]
     }
     
@@ -45,7 +46,6 @@ def configurar_cenario():
         "compensacao": config_compensacao
     }
     
-    # Retorna apenas um dicionário de configurações
     return configs
 
 # ##############################################################################
@@ -53,15 +53,15 @@ def configurar_cenario():
 # ##############################################################################
 def simular_rede(configs):
     """
-    Carrega um caso de estudo nativo, adiciona os ativos (DERs e baterias) e
-    executa a simulação de fluxo de potência.
+    Carrega um caso de estudo nativo da biblioteca pandapower, adiciona os ativos
+    e executa a simulação de fluxo de potência.
     """
     print("\nFASE 2: Iniciando a simulação da rede elétrica...")
 
-    # 1. Carrega o caso de estudo diretamente da biblioteca pandapower
+    # --- MUDANÇA AQUI: Carrega o caso de estudo grande diretamente da biblioteca ---
     try:
-        print("   -> Carregando 'case118' da biblioteca nativa do pandapower...")
-        net = nw.case118()
+        print("   -> Carregando 'case1354pegase' da biblioteca nativa do pandapower...")
+        net = nw.case1354pegase()
         print(f"   -> Sucesso! Rede '{net.name}' com {len(net.bus)} barras foi carregada.")
     except Exception as e:
         print(f"   -> ERRO ao carregar o caso de estudo nativo: {e}")
@@ -72,39 +72,42 @@ def simular_rede(configs):
     for der_info in configs['ders']['unidades']:
         barra, capacidade_mw, nome, tipo = der_info
         
-        # --- CORREÇÃO IMPORTANTE AQUI ---
-        # Pandapower usa indexação base 0. Os nomes das barras são base 1.
-        # Encontramos o índice interno da barra.
-        bus_index = net.bus[net.bus.name == barra].index
-        
-        if bus_index.empty:
-            print(f"      -> AVISO: Barra {barra} não encontrada. Pulando DER {nome}.")
-            continue
+        # O pandapower usa um índice interno (0, 1, 2...). As barras têm nomes (1, 2, 3...).
+        # Buscamos o índice interno que corresponde ao nome/número da barra.
+        bus_index_query = net.bus[net.bus.name == f"bus {barra}"]
 
-        # Remove qualquer gerador existente nesta barra para evitar conflitos
-        gens_na_barra = net.gen[net.gen.bus == bus_index[0]].index
+        if bus_index_query.empty:
+            print(f"      -> AVISO: Barra com nome 'bus {barra}' não encontrada. Pulando DER {nome}.")
+            continue
+        
+        bus_index = bus_index_query.index[0]
+
+        # Remove qualquer gerador existente nesta barra para evitar conflitos de controle de tensão
+        gens_na_barra = net.gen[net.gen.bus == bus_index].index
         if not gens_na_barra.empty:
             print(f"      -> Removendo {len(gens_na_barra)} gerador(es) existente(s) na barra {barra}.")
             net.gen.drop(gens_na_barra, inplace=True)
             
-        pp.create_gen(net, bus=bus_index[0], p_mw=capacidade_mw, name=nome, tags=tipo)
+        pp.create_gen(net, bus=bus_index, p_mw=capacidade_mw, name=nome, tags=tipo)
 
     # 3. Adiciona as Baterias à rede
     print("   -> Adicionando Baterias à rede...")
     for bat_info in configs['storage']['unidades']:
         barra, potencia_mw, capacidade_mwh, nome = bat_info
-        bus_index = net.bus[net.bus.name == barra].index
+        bus_index_query = net.bus[net.bus.name == f"bus {barra}"]
 
-        if bus_index.empty:
-            print(f"      -> AVISO: Barra {barra} não encontrada. Pulando Bateria {nome}.")
+        if bus_index_query.empty:
+            print(f"      -> AVISO: Barra com nome 'bus {barra}' não encontrada. Pulando Bateria {nome}.")
             continue
             
-        pp.create_storage(net, bus=bus_index[0], p_mw=potencia_mw, max_e_mwh=capacidade_mwh, name=nome)
+        bus_index = bus_index_query.index[0]
+        pp.create_storage(net, bus=bus_index, p_mw=potencia_mw, max_e_mwh=capacidade_mwh, name=nome)
         
     # 4. Executa a simulação de fluxo de potência
     print("   -> Executando a simulação de fluxo de potência (runpp)...")
     try:
-        pp.runpp(net)
+        # Aumentar o número máximo de iterações para redes grandes
+        pp.runpp(net, max_iteration=30)
         print("   -> Simulação concluída com sucesso.")
     except Exception as e:
         print(f"   -> ERRO durante a simulação do fluxo de potência: {e}")
