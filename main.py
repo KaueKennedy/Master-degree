@@ -68,7 +68,7 @@ def simular_rede(configs):
         
         with open('rede_inicial.pkl', 'wb') as f:
             pickle.dump(net, f)
-        print("   -> Rede inicial salva em 'rede_inicial.pkl' para análise no dashboard.")
+        print("   -> Rede inicial salva em 'rede_inicial.pkl'.")
 
     except Exception as e:
         print(f"   -> ERRO ao carregar o caso de estudo nativo: {e}")
@@ -78,14 +78,13 @@ def simular_rede(configs):
     for der_info in configs['ders']['unidades']:
         barra, capacidade_mw, nome, tipo = der_info
         
-        # --- CORREÇÃO IMPORTANTE AQUI: Busca pelo nome da barra (ex: "bus 3") ---
-        bus_index_query = net.bus[net.bus.name == f"bus {barra}"]
-
+        # --- CORREÇÃO DEFINITIVA: Busca a barra pelo NOME e obtém o ÍNDICE ---
+        bus_index_query = net.bus[net.bus.name == barra]
         if bus_index_query.empty:
-            print(f"      -> AVISO: Barra com nome 'bus {barra}' não encontrada. Pulando DER {nome}.")
+            print(f"      -> AVISO: Barra com nome {barra} não encontrada. Pulando DER {nome}.")
             continue
-        
         bus_index = bus_index_query.index[0]
+        # ----------------------------------------------------------------------
 
         gens_na_barra = net.gen[net.gen.bus == bus_index].index
         if not gens_na_barra.empty:
@@ -98,14 +97,14 @@ def simular_rede(configs):
     for bat_info in configs['storage']['unidades']:
         barra, potencia_mw, capacidade_mwh, nome = bat_info
         
-        # --- CORREÇÃO IMPORTANTE AQUI: Busca pelo nome da barra (ex: "bus 3") ---
-        bus_index_query = net.bus[net.bus.name == f"bus {barra}"]
-
+        # --- CORREÇÃO DEFINITIVA: Busca a barra pelo NOME e obtém o ÍNDICE ---
+        bus_index_query = net.bus[net.bus.name == barra]
         if bus_index_query.empty:
-            print(f"      -> AVISO: Barra com nome 'bus {barra}' não encontrada. Pulando Bateria {nome}.")
+            print(f"      -> AVISO: Barra com nome {barra} não encontrada. Pulando Bateria {nome}.")
             continue
-            
         bus_index = bus_index_query.index[0]
+        # ----------------------------------------------------------------------
+
         pp.create_storage(net, bus=bus_index, p_mw=potencia_mw, max_e_mwh=capacidade_mwh, name=nome)
         
     print("   -> Executando a simulação de fluxo de potência (runpp)...")
