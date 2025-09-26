@@ -20,9 +20,9 @@ def configurar_cenario():
         'unidades': [
             # Formato: (id_da_barra, capacidade_mw, nome, tipo_der)
             # Barras escolhidas do caso de 1354 barras
-            (803, 150, 'Solar_Farm_1', 'solar'),
-            (804, 200, 'Wind_Turbine_1', 'eolico'),
-            (805, 100, 'Solar_Farm_2', 'solar'),
+            (3, 150, 'Solar_Farm_1', 'solar'),
+            (4, 200, 'Wind_Turbine_1', 'eolico'),
+            (10, 100, 'Solar_Farm_2', 'solar'),
         ]
     }
 
@@ -31,9 +31,9 @@ def configurar_cenario():
         'unidades': [
             # Formato: (barra, potencia_mw, capacidade_mwh, nome)
             # Pares com os DERs nas mesmas barras
-            (803, 75.0, 300.0, 'Bateria_1'),
-            (804, 100.0, 400.0, 'Bateria_2'),
-            (805, 50.0, 200.0, 'Bateria_3'),
+            (3, 75.0, 300.0, 'Bateria_1'),
+            (4, 100.0, 400.0, 'Bateria_2'),
+            (10, 50.0, 200.0, 'Bateria_3'),
         ]
     }
     
@@ -61,36 +61,32 @@ def simular_rede(configs):
     """
     print("\nFASE 2: Iniciando a simulação da rede elétrica...")
 
-    # --- MUDANÇA AQUI: Carrega o caso de estudo grande diretamente da biblioteca ---
     try:
         print("   -> Carregando 'case1354pegase' da biblioteca nativa do pandapower...")
         net = nw.case1354pegase()
         print(f"   -> Sucesso! Rede '{net.name}' com {len(net.bus)} barras foi carregada.")
-
-    # --- ADIÇÃO IMPORTANTE: Salva a rede inicial para o dashboard ---
+        
         with open('rede_inicial.pkl', 'wb') as f:
             pickle.dump(net, f)
         print("   -> Rede inicial salva em 'rede_inicial.pkl' para análise no dashboard.")
-        # -----------------------------------------------------------
 
     except Exception as e:
         print(f"   -> ERRO ao carregar o caso de estudo nativo: {e}")
         return None
 
-    # 2. Adiciona os DERs à rede
     print("   -> Adicionando DERs à rede...")
     for der_info in configs['ders']['unidades']:
         barra, capacidade_mw, nome, tipo = der_info
         
-        # Para redes importadas, o número da barra é o seu índice.
-        bus_index = barra
-        if bus_index not in net.bus.index:
-            print(f"      -> AVISO: Barra de índice {bus_index} não encontrada. Pulando DER {nome}.")
+        # --- CORREÇÃO IMPORTANTE AQUI: Busca pelo nome da barra (ex: "bus 3") ---
+        bus_index_query = net.bus[net.bus.name == f"bus {barra}"]
+
+        if bus_index_query.empty:
+            print(f"      -> AVISO: Barra com nome 'bus {barra}' não encontrada. Pulando DER {nome}.")
             continue
         
-        bus_index = barra
+        bus_index = bus_index_query.index[0]
 
-        # Remove qualquer gerador existente nesta barra para evitar conflitos de controle de tensão
         gens_na_barra = net.gen[net.gen.bus == bus_index].index
         if not gens_na_barra.empty:
             print(f"      -> Removendo {len(gens_na_barra)} gerador(es) existente(s) na barra {barra}.")
@@ -98,10 +94,11 @@ def simular_rede(configs):
             
         pp.create_gen(net, bus=bus_index, p_mw=capacidade_mw, name=nome, tags=tipo)
 
-    # 3. Adiciona as Baterias à rede
     print("   -> Adicionando Baterias à rede...")
     for bat_info in configs['storage']['unidades']:
         barra, potencia_mw, capacidade_mwh, nome = bat_info
+        
+        # --- CORREÇÃO IMPORTANTE AQUI: Busca pelo nome da barra (ex: "bus 3") ---
         bus_index_query = net.bus[net.bus.name == f"bus {barra}"]
 
         if bus_index_query.empty:
@@ -111,10 +108,8 @@ def simular_rede(configs):
         bus_index = bus_index_query.index[0]
         pp.create_storage(net, bus=bus_index, p_mw=potencia_mw, max_e_mwh=capacidade_mwh, name=nome)
         
-    # 4. Executa a simulação de fluxo de potência
     print("   -> Executando a simulação de fluxo de potência (runpp)...")
     try:
-        # Aumentar o número máximo de iterações para redes grandes
         pp.runpp(net, max_iteration=30)
         print("   -> Simulação concluída com sucesso.")
     except Exception as e:

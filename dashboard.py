@@ -54,7 +54,7 @@ def analisar_rede():
     cargas = net.load
     potencia_total_cargas = cargas.p_mw.sum()
     
-    limiar_cidade_grande = cargas.p_mw.quantile(0.80)
+    limiar_cidade_grande = cargas.p_mw.quantile(0.95)  # Top 5% como grandes centros
     
     cidades_grandes = cargas[cargas.p_mw >= limiar_cidade_grande]
     cidades_interior = cargas[cargas.p_mw < limiar_cidade_grande]
