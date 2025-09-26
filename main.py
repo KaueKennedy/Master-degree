@@ -2,6 +2,9 @@ import pandapower as pp
 import pandapower.networks as nw
 import os
 import numpy as np
+import pickle # Importa a biblioteca para salvar/carregar objetos python
+import subprocess
+import sys
 
 # ##############################################################################
 # FASE 1: CONFIGURAÇÃO DO CENÁRIO
@@ -17,9 +20,9 @@ def configurar_cenario():
         'unidades': [
             # Formato: (id_da_barra, capacidade_mw, nome, tipo_der)
             # Barras escolhidas do caso de 1354 barras
-            (100, 150, 'Solar_Farm_1', 'solar'),
-            (500, 200, 'Wind_Turbine_1', 'eolico'),
-            (1000, 100, 'Solar_Farm_2', 'solar'),
+            (803, 150, 'Solar_Farm_1', 'solar'),
+            (804, 200, 'Wind_Turbine_1', 'eolico'),
+            (805, 100, 'Solar_Farm_2', 'solar'),
         ]
     }
 
@@ -28,9 +31,9 @@ def configurar_cenario():
         'unidades': [
             # Formato: (barra, potencia_mw, capacidade_mwh, nome)
             # Pares com os DERs nas mesmas barras
-            (100, 75.0, 300.0, 'Bateria_1'),
-            (500, 100.0, 400.0, 'Bateria_2'),
-            (1000, 50.0, 200.0, 'Bateria_3'),
+            (803, 75.0, 300.0, 'Bateria_1'),
+            (804, 100.0, 400.0, 'Bateria_2'),
+            (805, 50.0, 200.0, 'Bateria_3'),
         ]
     }
     
@@ -63,6 +66,13 @@ def simular_rede(configs):
         print("   -> Carregando 'case1354pegase' da biblioteca nativa do pandapower...")
         net = nw.case1354pegase()
         print(f"   -> Sucesso! Rede '{net.name}' com {len(net.bus)} barras foi carregada.")
+
+    # --- ADIÇÃO IMPORTANTE: Salva a rede inicial para o dashboard ---
+        with open('rede_inicial.pkl', 'wb') as f:
+            pickle.dump(net, f)
+        print("   -> Rede inicial salva em 'rede_inicial.pkl' para análise no dashboard.")
+        # -----------------------------------------------------------
+
     except Exception as e:
         print(f"   -> ERRO ao carregar o caso de estudo nativo: {e}")
         return None
@@ -72,15 +82,13 @@ def simular_rede(configs):
     for der_info in configs['ders']['unidades']:
         barra, capacidade_mw, nome, tipo = der_info
         
-        # O pandapower usa um índice interno (0, 1, 2...). As barras têm nomes (1, 2, 3...).
-        # Buscamos o índice interno que corresponde ao nome/número da barra.
-        bus_index_query = net.bus[net.bus.name == f"bus {barra}"]
-
-        if bus_index_query.empty:
-            print(f"      -> AVISO: Barra com nome 'bus {barra}' não encontrada. Pulando DER {nome}.")
+        # Para redes importadas, o número da barra é o seu índice.
+        bus_index = barra
+        if bus_index not in net.bus.index:
+            print(f"      -> AVISO: Barra de índice {bus_index} não encontrada. Pulando DER {nome}.")
             continue
         
-        bus_index = bus_index_query.index[0]
+        bus_index = barra
 
         # Remove qualquer gerador existente nesta barra para evitar conflitos de controle de tensão
         gens_na_barra = net.gen[net.gen.bus == bus_index].index
@@ -169,6 +177,11 @@ def main():
 
     # FASE 2
     net_simulada = simular_rede(configs)
+
+    print("\n" + "="*50)
+    print("Executando o Dashboard de Análise da Rede Base...")
+    subprocess.run([sys.executable, "dashboard.py"])
+    print("="*50 + "\n")
 
     # FASE 3
     indicadores = calcular_indicadores(net_simulada, configs)
